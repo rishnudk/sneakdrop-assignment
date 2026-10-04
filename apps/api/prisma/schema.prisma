@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String          @id @default(uuid())
+  username  String          @unique
+  createdAt DateTime        @default(now())
+  holds     Hold[]
+  waitlist  WaitlistEntry[]
+}
+
+model Product {
+  id         String     @id @default(uuid())
+  name       String
+  priceCents Int
+  inventory  Inventory?
+  holds      Hold[]
+  waitlist   WaitlistEntry[]
+}
+
+model Inventory {
+  id        String  @id @default(uuid())
+  productId String  @unique
+  product   Product @relation(fields: [productId], references: [id])
+  total     Int
+  available Int
+}
+
+enum HoldStatus {
+  HELD
+  PAID
+  EXPIRED
+  CANCELLED
+}
+
+enum HoldSource {
+  DIRECT
+  WAITLIST
+}
+
+model Hold {
+  id        String     @id @default(uuid())
+  userId    String
+  productId String
+  status    HoldStatus @default(HELD)
+  source    HoldSource @default(DIRECT)
+  expiresAt DateTime
+  paidAt    DateTime?
+  createdAt DateTime   @default(now())
+
+  user     User      @relation(fields: [userId], references: [id])
+  product  Product   @relation(fields: [productId], references: [id])
+  payments Payment[]
+
+  @@index([status, expiresAt])
+  @@index([userId, status])
+  @@index([productId, status])
+}
+
+enum WaitStatus {
+  WAITING
+  PROMOTED
+  LEFT
+}
+
+model WaitlistEntry {
+  id        String     @id @default(uuid())
+  seq       BigInt     @default(autoincrement())
+  userId    String
+  productId String
+  status    WaitStatus @default(WAITING)
+  createdAt DateTime   @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId, status, seq])
+  @@index([userId, productId, status])
+}
+
+enum PaymentStatus {
+  CREATED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+model Payment {
+  id           String        @id @default(uuid())
+  holdId       String
+  providerRef  String        @unique
+  status       PaymentStatus @default(CREATED)
+  lastSeq      Int           @default(0)
+  refundNeeded Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+
+  hold Hold @relation(fields: [holdId], references: [id])
+
+  @@index([holdId])
+  @@index([status])
+}
+
+model WebhookEvent {
+  eventId     String    @id
+  type        String
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  outcome     String?
+}
