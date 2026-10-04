@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { buy } from '../services/hold.service.js';
 import { joinWaitlist, leaveWaitlist, getWaitlistPosition } from '../services/waitlist.service.js';
+import { startPayment } from '../services/payment.service.js';
 import { fakeAuth } from '../middleware/fakeAuth.js';
 import { DEFAULT_PRODUCT_ID } from '../../prisma/seed.js';
 import { prisma } from '../db.js';
@@ -73,6 +74,25 @@ dropRouter.get('/waitlist/status', async (req: Request, res: Response, next: Nex
     res.status(200).json({
       inQueue: position !== null,
       waitlist: position,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/holds/:id/pay
+ * Starts payment for an active hold.
+ */
+dropRouter.post('/holds/:id/pay', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const holdId = req.params.id;
+    const chaosOverrides = req.body?.chaos;
+    const payment = await startPayment(req.user!.id, holdId, chaosOverrides);
+
+    res.status(202).json({
+      message: 'Payment initiated; awaiting gateway confirmation',
+      ...payment,
     });
   } catch (err) {
     next(err);

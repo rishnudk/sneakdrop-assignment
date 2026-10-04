@@ -1,22 +1,32 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { dropRouter } from './routes/drop.routes.js';
+import { webhookRouter } from './routes/webhook.routes.js';
 import { AppError } from './lib/errors.js';
 
 export const app = express();
 
 app.use(cors());
 
-// Parse JSON bodies for standard API endpoints
-app.use(express.json());
+// Parse JSON bodies with raw buffer capture for HMAC verification
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf.toString('utf-8');
+    },
+  })
+);
 
 // Health check endpoint
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Mount drop endpoints
+// Mount drop API routes
 app.use('/api', dropRouter);
+
+// Mount payment webhook routes
+app.use('/webhooks', webhookRouter);
 
 // Centralized error handling middleware
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
