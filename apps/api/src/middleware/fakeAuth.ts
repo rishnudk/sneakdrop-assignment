@@ -21,12 +21,27 @@ export async function fakeAuth(req: Request, _res: Response, next: NextFunction)
       throw new AppError(401, 'UNAUTHORIZED', 'Missing required x-user-id header');
     }
 
-    // Upsert user based on username/id so DB foreign keys remain valid
-    const user = await prisma.user.upsert({
+    // Fast path: find existing user
+    let user = await prisma.user.findUnique({
       where: { username: rawUserId },
-      update: {},
-      create: { username: rawUserId },
     });
+
+    if (!user) {
+      try {
+        user = await prisma.user.create({
+          data: { username: rawUserId },
+        });
+      } catch (err: any) {
+        // If another parallel request created the user concurrently, recover cleanly
+        if (err.code === 'P2002') {
+          user = await prisma.user.findUniqueOrThrow({
+            where: { username: rawUserId },
+          });
+        } else {
+          throw err;
+        }
+      }
+    }
 
     req.user = {
       id: user.id,

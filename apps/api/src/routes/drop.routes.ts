@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { buy } from '../services/hold.service.js';
 import { joinWaitlist, leaveWaitlist, getWaitlistPosition } from '../services/waitlist.service.js';
 import { startPayment } from '../services/payment.service.js';
+import { getDropStatus, getInvariants } from '../services/status.service.js';
 import { fakeAuth } from '../middleware/fakeAuth.js';
 import { DEFAULT_PRODUCT_ID } from '../../prisma/seed.js';
 import { prisma } from '../db.js';
@@ -94,6 +95,34 @@ dropRouter.post('/holds/:id/pay', async (req: Request, res: Response, next: Next
       message: 'Payment initiated; awaiting gateway confirmation',
       ...payment,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/status
+ * Read model for the drop page (pairs left, countdown, and place in waiting line).
+ */
+dropRouter.get('/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = (req.query.productId as string) || DEFAULT_PRODUCT_ID;
+    const status = await getDropStatus(req.user!.id, productId);
+    res.status(200).json(status);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/admin/invariants
+ * Developer/evaluator endpoint verifying the conservation invariant.
+ */
+dropRouter.get('/admin/invariants', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = (req.query.productId as string) || DEFAULT_PRODUCT_ID;
+    const invariants = await getInvariants(productId);
+    res.status(200).json(invariants);
   } catch (err) {
     next(err);
   }
