@@ -106,12 +106,29 @@ export async function sweepExpired(tx: Tx, productId: string) {
  *  - Queue priority (cannot jump queue if already waiting)
  */
 export async function buy(userId: string, productId: string) {
-  return prisma.$transaction(async (tx) => {
-    // 1. Lock the inventory row first (standard lock order prevents deadlock)
-    await lockInventory(tx, productId);
+  // Fast-path read: if stock is already 0 and no holds are expired, reject immediately
+  // to avoid exhausting connection pools under massive stampedes
+  const fastInv = await prisma.inventory.findUnique({
+    where: { productId },
+    select: { available: true },
+  });
 
-    // 2. Perform lazy sweep of any expired holds
-    await sweepExpired(tx, productId);
+  if (fastInv && fastInv.available === 0) {
+    const expiredCount = await prisma.hold.count({
+      where: { productId, status: 'HELD', expiresAt: { lte: new Date() } },
+    });
+    if (expiredCount === 0) {
+      throw new AppError(409, 'SOLD_OUT', 'All pairs are currently held or sold.');
+    }
+  }
+
+  return prisma.$transaction(
+    async (tx) => {
+      // 1. Lock the inventory row first (standard lock order prevents deadlock)
+      await lockInventory(tx, productId);
+
+      // 2. Perform lazy sweep of any expired holds
+      await sweepExpired(tx, productId);
 
     // 3. User quota validation
     const [counts] = await tx.$queryRaw<{ active: number; paid: number }[]>`
@@ -175,5 +192,7 @@ export async function buy(userId: string, productId: string) {
     `;
 
     return hold;
-  });
+  },
+  { maxWait: 15000, timeout: 20000 }
+  );
 }
