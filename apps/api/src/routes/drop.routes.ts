@@ -1,7 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { buy } from '../services/hold.service.js';
+import { joinWaitlist, leaveWaitlist, getWaitlistPosition } from '../services/waitlist.service.js';
 import { fakeAuth } from '../middleware/fakeAuth.js';
 import { DEFAULT_PRODUCT_ID } from '../../prisma/seed.js';
+import { prisma } from '../db.js';
 
 export const dropRouter = Router();
 
@@ -20,6 +22,57 @@ dropRouter.post('/buy', async (req: Request, res: Response, next: NextFunction) 
     res.status(201).json({
       message: 'Hold acquired successfully',
       hold,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/waitlist/join
+ * Joins the waiting queue when stock is 0.
+ */
+dropRouter.post('/waitlist/join', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = req.body?.productId || DEFAULT_PRODUCT_ID;
+    const result = await joinWaitlist(req.user!.id, productId);
+
+    res.status(201).json({
+      message: 'Joined waiting line successfully',
+      ...result,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/waitlist/leave
+ * Leaves the waiting queue voluntarily.
+ */
+dropRouter.post('/waitlist/leave', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = req.body?.productId || DEFAULT_PRODUCT_ID;
+    const result = await leaveWaitlist(req.user!.id, productId);
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/waitlist/status
+ * Retrieves current user position in line.
+ */
+dropRouter.get('/waitlist/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = (req.query.productId as string) || DEFAULT_PRODUCT_ID;
+    const position = await getWaitlistPosition(prisma, req.user!.id, productId);
+
+    res.status(200).json({
+      inQueue: position !== null,
+      waitlist: position,
     });
   } catch (err) {
     next(err);

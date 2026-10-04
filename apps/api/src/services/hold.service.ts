@@ -4,7 +4,80 @@ import { AppError } from '../lib/errors.js';
 import { config } from '../config.js';
 
 /**
- * Checks and marks any holds whose expiresAt <= now() as EXPIRED.
+ * Verifies if a user is still eligible to receive a pair (no active holds, paid < limit).
+ */
+async function isEligible(tx: Tx, userId: string, productId: string): Promise<boolean> {
+  const [counts] = await tx.$queryRaw<{ active: number; paid: number }[]>`
+    SELECT count(*) FILTER (WHERE status = 'HELD')::int AS active,
+           count(*) FILTER (WHERE status = 'PAID')::int AS paid
+    FROM "Hold"
+    WHERE "userId" = ${userId} AND "productId" = ${productId}
+  `;
+  return counts.active === 0 && counts.paid < config.PURCHASE_LIMIT;
+}
+
+/**
+ * Releases a single expired/freed inventory unit.
+ * Implements DIRECT HAND-OFF:
+ * - If someone is in the waiting line, promotes them directly into an active hold with fresh 5-minute countdown.
+ * - Only if the queue is empty does the unit return to public available stock.
+ * This guarantees outside buyers cannot jump ahead of queued users.
+ */
+export async function releaseUnit(tx: Tx, productId: string) {
+  while (true) {
+    const [next] = await tx.$queryRaw<{ id: string; userId: string }[]>`
+      SELECT id, "userId"
+      FROM "WaitlistEntry"
+      WHERE "productId" = ${productId} AND status = 'WAITING'
+      ORDER BY seq ASC
+      LIMIT 1
+      FOR UPDATE
+    `;
+
+    if (!next) {
+      // Nobody waiting: return pair directly back to available inventory
+      await tx.$executeRaw`
+        UPDATE "Inventory"
+        SET available = available + 1
+        WHERE "productId" = ${productId}
+      `;
+      return;
+    }
+
+    if (!(await isEligible(tx, next.userId, productId))) {
+      // User is no longer eligible, mark LEFT and try the next person in line
+      await tx.waitlistEntry.update({
+        where: { id: next.id },
+        data: { status: 'LEFT' },
+      });
+      continue;
+    }
+
+    // Direct hand-off: mark waitlist entry as PROMOTED
+    await tx.waitlistEntry.update({
+      where: { id: next.id },
+      data: { status: 'PROMOTED' },
+    });
+
+    // Create a new 5-minute hold directly for this promoted user
+    await tx.$executeRaw`
+      INSERT INTO "Hold" (id, "userId", "productId", status, source, "expiresAt")
+      VALUES (
+        gen_random_uuid(),
+        ${next.userId},
+        ${productId},
+        'HELD',
+        'WAITLIST',
+        now() + (${config.HOLD_TTL_SECONDS} * interval '1 second')
+      )
+    `;
+
+    return; // Direct hand-off complete
+  }
+}
+
+/**
+ * Sweeps all expired holds (expiresAt <= now()) and releases each unit.
  * Must be executed within a transaction holding the inventory row lock.
  */
 export async function sweepExpired(tx: Tx, productId: string) {
@@ -17,20 +90,8 @@ export async function sweepExpired(tx: Tx, productId: string) {
     RETURNING id
   `;
 
-  // For any expired hold without an active waitlist, available units are restored
-  if (expired.length > 0) {
-    // Check if there are users waiting in the queue
-    const waitingCount = await tx.waitlistEntry.count({
-      where: { productId, status: 'WAITING' },
-    });
-
-    if (waitingCount === 0) {
-      await tx.$executeRaw`
-        UPDATE "Inventory"
-        SET available = available + ${expired.length}
-        WHERE "productId" = ${productId}
-      `;
-    }
+  for (let i = 0; i < expired.length; i++) {
+    await releaseUnit(tx, productId);
   }
 
   return expired;
