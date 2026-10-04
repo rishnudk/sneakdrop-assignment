@@ -1,0 +1,29 @@
+{
+  "name": "sneaker-drop",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:migrate": "npm -w apps/api exec prisma migrate dev",
+    "db:seed": "npm -w apps/api exec tsx prisma/seed.ts",
+    "dev:api": "npm -w apps/api run dev",
+    "dev:worker": "npm -w apps/api run worker",
+    "dev:pay": "npm -w apps/payments-mock run dev",
+    "dev:web": "npm -w apps/web run dev",
+    "dev": "concurrently -n api,worker,pay,web -c blue,yellow,magenta,green \"npm -w apps/api run dev\" \"npm -w apps/api run worker\" \"npm -w apps/payments-mock run dev\" \"npm -w apps/web run dev\"",
+    "test": "vitest run",
+    "load": "tsx scripts/load-test.ts",
+    "check": "tsx scripts/check-invariants.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}

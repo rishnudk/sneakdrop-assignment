@@ -37,3 +37,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+
+guide.md
+todo.md
