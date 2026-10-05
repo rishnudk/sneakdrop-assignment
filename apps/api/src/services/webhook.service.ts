@@ -48,8 +48,7 @@ export async function handlePaymentEvent(
       return { outcome: 'DUPLICATE_NOOP', eventId: evt.event_id };
     }
 
-    // 2. Locate and lock the Payment row
-    const [payment] = await tx.$queryRaw<
+    let [payment] = await tx.$queryRaw<
       {
         id: string;
         holdId: string;
@@ -63,6 +62,29 @@ export async function handlePaymentEvent(
       WHERE "providerRef" = ${evt.provider_ref}
       FOR UPDATE
     `;
+
+    // Fallback lookup by holdId if providerRef was generated differently
+    if (!payment && evt.hold_id) {
+      const [byHold] = await tx.$queryRaw<
+        {
+          id: string;
+          holdId: string;
+          providerRef: string;
+          status: string;
+          lastSeq: number;
+          refundNeeded: boolean;
+        }[]
+      >`
+        SELECT * FROM "Payment"
+        WHERE "holdId" = ${evt.hold_id}
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+        FOR UPDATE
+      `;
+      if (byHold) {
+        payment = byHold;
+      }
+    }
 
     if (!payment) {
       // Payment row was not found (e.g. webhook raced ahead of DB insert)

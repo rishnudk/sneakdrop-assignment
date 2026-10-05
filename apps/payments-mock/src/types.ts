@@ -15,6 +15,7 @@ export interface PaymentEvent {
 
 export interface ChargeRequest {
   holdId: string;
+  providerRef?: string;
   amountCents?: number;
   callbackUrl?: string;
   chaos?: {

@@ -127,3 +127,102 @@ dropRouter.get('/admin/invariants', async (req: Request, res: Response, next: Ne
     next(err);
   }
 });
+
+/**
+ * POST /api/admin/simulate-rush
+ * Simulates concurrent buyers hitting the buy endpoint at the exact same millisecond.
+ */
+dropRouter.post('/admin/simulate-rush', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const count = Math.min(Number(req.body?.count) || 30, 100);
+    const productId = req.body?.productId || DEFAULT_PRODUCT_ID;
+    const autoWaitlist = Boolean(req.body?.autoWaitlist ?? true);
+
+    const startTime = performance.now();
+
+    // 1. Ensure all simulated users exist
+    const usernames = Array.from({ length: count }, (_, i) => `rush-shopper-${i + 1}`);
+    const userRecords = await Promise.all(
+      usernames.map(async (uname) => {
+        return prisma.user.upsert({
+          where: { username: uname },
+          update: {},
+          create: { username: uname },
+        });
+      })
+    );
+
+    // 2. Fire simultaneous buy requests at the exact same millisecond
+    const buyPromises = userRecords.map(async (u) => {
+      try {
+        const hold = await buy(u.id, productId);
+        return { username: u.username, userId: u.id, status: 'HELD', holdId: hold.id };
+      } catch (err: any) {
+        return { username: u.username, userId: u.id, status: err.code || 'ERROR', message: err.message };
+      }
+    });
+
+    const results = await Promise.all(buyPromises);
+    const held = results.filter((r) => r.status === 'HELD');
+    const soldOut = results.filter((r) => r.status === 'SOLD_OUT');
+
+    // 3. Have sold-out users join the waiting line automatically
+    let waitlistedCount = 0;
+    if (autoWaitlist && soldOut.length > 0) {
+      await Promise.all(
+        soldOut.map(async (so) => {
+          try {
+            await joinWaitlist(so.userId, productId);
+            waitlistedCount++;
+          } catch {
+            // ignore if already in queue
+          }
+        })
+      );
+    }
+
+    const durationMs = Math.round(performance.now() - startTime);
+
+    res.status(200).json({
+      message: `Simulated ${count} concurrent buyers`,
+      attempted: count,
+      held: held.length,
+      soldOut: soldOut.length,
+      waitlisted: waitlistedCount,
+      durationMs,
+      results,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/admin/reset
+ * Resets the drop back to initial state (20 available, no holds, no waitlist).
+ */
+dropRouter.post('/admin/reset', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const productId = req.body?.productId || DEFAULT_PRODUCT_ID;
+
+    await prisma.webhookEvent.deleteMany();
+    await prisma.payment.deleteMany();
+    await prisma.hold.deleteMany();
+    await prisma.waitlistEntry.deleteMany();
+
+    await prisma.inventory.upsert({
+      where: { productId },
+      update: { total: 20, available: 20 },
+      create: { productId, total: 20, available: 20 },
+    });
+
+    res.status(200).json({
+      message: 'Drop reset successfully to 20 available pairs.',
+      available: 20,
+      total: 20,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+

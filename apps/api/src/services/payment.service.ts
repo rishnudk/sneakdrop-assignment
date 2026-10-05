@@ -74,6 +74,7 @@ export async function startPayment(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         holdId: hold.id,
+        providerRef,
         amountCents: hold.product.priceCents,
         callbackUrl: `${config.API_BASE_URL}/webhooks/payments`,
         chaos: chaosOverrides,

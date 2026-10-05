@@ -36,7 +36,7 @@ app.post('/charges', (req: Request, res: Response) => {
     return;
   }
 
-  const providerRef = `pay_${uuidv4()}`;
+  const providerRef = chargeRequest.providerRef || `pay_${uuidv4()}`;
   const targetWebhookUrl =
     chargeRequest.callbackUrl || `${config.API_BASE_URL}/webhooks/payments`;
 
