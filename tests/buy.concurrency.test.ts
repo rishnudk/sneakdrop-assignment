@@ -34,6 +34,9 @@ describe('Step 3: Concurrency & Zero-Oversell Test', () => {
   });
 
   afterAll(async () => {
+    await prisma.hold.deleteMany();
+    await prisma.waitlistEntry.deleteMany();
+    await prisma.user.deleteMany();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await prisma.$disconnect();
   });

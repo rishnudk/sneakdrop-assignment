@@ -35,10 +35,10 @@ export async function releaseUnit(tx: Tx, productId: string) {
     `;
 
     if (!next) {
-      // Nobody waiting: return pair directly back to available inventory
+      // Nobody waiting: return pair directly back to available inventory (clamped to total)
       await tx.$executeRaw`
         UPDATE "Inventory"
-        SET available = available + 1
+        SET available = LEAST(total, available + 1)
         WHERE "productId" = ${productId}
       `;
       return;
